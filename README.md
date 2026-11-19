@@ -2,7 +2,7 @@
 
 Aplicación web para cambiar **dólares (USD) y soles (PEN)** con el tipo de cambio de SUNAT. Permite crear una cuenta, iniciar sesión, registrar solicitudes de cambio y consultar el historial de operaciones por rango de fechas.
 
-Este proyecto es el cliente de la API `kambista-fx-api`: necesita tenerla en ejecución para funcionar.
+Este proyecto es el cliente de la API `kambista-api`: necesita tenerla en ejecución para funcionar.
 
 ## Tabla de contenidos
 
@@ -47,7 +47,7 @@ Este proyecto es el cliente de la API `kambista-fx-api`: necesita tenerla en eje
 ## Requisitos previos
 
 - **Node.js 20 o superior** y **npm**.
-- La API **`kambista-fx-api` en ejecución**. Sigue el README de ese repositorio. Por defecto escucha en `http://localhost:3000`.
+- La API **`kambista-api` en ejecución**. Sigue el README de ese repositorio. Por defecto escucha en `http://localhost:3000`.
 
 ## Puesta en marcha paso a paso
 
