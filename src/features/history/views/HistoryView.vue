@@ -4,19 +4,31 @@ import AppAlert from '@/shared/ui/AppAlert.vue';
 import AppButton from '@/shared/ui/AppButton.vue';
 import AppInput from '@/shared/ui/AppInput.vue';
 import EmptyState from '@/shared/ui/EmptyState.vue';
+import HistoryPagination from '../components/HistoryPagination.vue';
 import HistorySkeleton from '../components/HistorySkeleton.vue';
 import HistoryTable from '../components/HistoryTable.vue';
 import { useHistory } from '../composables/useHistory';
 
-const { values, errors, isSubmitting, submitError, transactions, isAdmin, touch, load } =
-  useHistory();
+const {
+  values,
+  errors,
+  isSubmitting,
+  submitError,
+  transactions,
+  pagination,
+  isAdmin,
+  touch,
+  search,
+  retry,
+  goToPage,
+} = useHistory();
 
 const summary = computed(() => {
-  const total = transactions.value?.length ?? 0;
+  const total = pagination.value?.total ?? 0;
   return `${total} ${total === 1 ? 'operación' : 'operaciones'}`;
 });
 
-onMounted(load);
+onMounted(search);
 </script>
 
 <template>
@@ -29,7 +41,7 @@ onMounted(load);
     <form
       class="mt-8 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
       novalidate
-      @submit.prevent="load"
+      @submit.prevent="search"
     >
       <div class="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <AppInput
@@ -67,7 +79,7 @@ onMounted(load);
 
       <div v-else-if="submitError" class="space-y-4 p-6">
         <AppAlert variant="error">{{ submitError }}</AppAlert>
-        <AppButton variant="secondary" @click="load">Reintentar</AppButton>
+        <AppButton variant="secondary" @click="retry">Reintentar</AppButton>
       </div>
 
       <EmptyState
@@ -76,11 +88,17 @@ onMounted(load);
         description="No encontramos operaciones en el rango seleccionado. Prueba con otras fechas."
       />
 
-      <template v-else-if="transactions">
+      <template v-else-if="transactions && pagination">
         <p class="border-b border-slate-100 px-6 py-4 text-sm font-medium text-slate-600">
           {{ summary }}
         </p>
         <HistoryTable :transactions="transactions" />
+        <HistoryPagination
+          v-if="pagination.totalPages > 1"
+          :pagination="pagination"
+          :disabled="isSubmitting"
+          @change="goToPage"
+        />
       </template>
     </section>
   </div>

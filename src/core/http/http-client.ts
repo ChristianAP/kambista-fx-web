@@ -1,9 +1,10 @@
 import { API_URL } from '@/core/config';
 import { loadSession } from '@/core/storage/session-storage';
 import { ApiError } from './api-error';
+import { type Paginated, readPageInfo } from './pagination';
 
 type Method = 'GET' | 'POST';
-type Query = Record<string, string | undefined>;
+type Query = Record<string, string | number | undefined>;
 type SessionRenewer = () => Promise<boolean>;
 
 interface RequestOptions {
@@ -24,9 +25,9 @@ export const setSessionRenewer = (renewer: SessionRenewer | null): void => {
 };
 
 const buildUrl = (path: string, query: Query = {}): string => {
-  const entries = Object.entries(query).filter((entry): entry is [string, string] =>
-    Boolean(entry[1]),
-  );
+  const entries = Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== '')
+    .map(([key, value]) => [key, String(value)]);
   const search = new URLSearchParams(entries).toString();
   return search ? `${API_URL}${path}?${search}` : `${API_URL}${path}`;
 };
@@ -95,6 +96,12 @@ const request = async <T>(method: Method, path: string, options?: RequestOptions
 
 export const http = {
   get: <T>(path: string, query?: Query) => request<T>('GET', path, { query }),
+
+  getPage: async <T>(path: string, query?: Query): Promise<Paginated<T>> => {
+    const { response, payload } = await call('GET', path, { query });
+    const items = payload as T[];
+    return { items, pagination: readPageInfo(response.headers, items.length) };
+  },
 
   post: <T>(path: string, body: unknown, options: Pick<RequestOptions, 'authenticated'> = {}) =>
     request<T>('POST', path, { ...options, body }),

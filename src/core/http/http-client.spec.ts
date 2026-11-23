@@ -6,10 +6,14 @@ import { http, onUnauthorized, setSessionRenewer } from './http-client';
 
 const fetchMock = vi.fn();
 
-const jsonResponse = (body: unknown, status = 200): Response =>
+const jsonResponse = (
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   });
 
 const lastRequest = (): [string, RequestInit] =>
@@ -62,9 +66,10 @@ describe('http client', () => {
       startDate: '2026-11-01',
       endDate: '',
       userId: undefined,
+      page: 2,
     });
 
-    expect(lastRequest()[0]).toMatch(/\/history\?startDate=2026-11-01$/);
+    expect(lastRequest()[0]).toMatch(/\/history\?startDate=2026-11-01&page=2$/);
   });
 
   it('turns an error response into an ApiError', async () => {
@@ -194,6 +199,32 @@ describe('http client', () => {
       });
 
       expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('paginated responses', () => {
+    it('reads the page information from the response headers', async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse([{ id: 'tx-1' }, { id: 'tx-2' }], 200, {
+          'X-Total-Count': '25',
+          'X-Page': '2',
+          'X-Limit': '10',
+          'X-Total-Pages': '3',
+        }),
+      );
+
+      const page = await http.getPage('/transactions/history');
+
+      expect(page.items).toHaveLength(2);
+      expect(page.pagination).toEqual({ total: 25, page: 2, limit: 10, totalPages: 3 });
+    });
+
+    it('falls back to a single page when the headers are missing', async () => {
+      fetchMock.mockResolvedValue(jsonResponse([{ id: 'tx-1' }, { id: 'tx-2' }]));
+
+      const page = await http.getPage('/transactions/history');
+
+      expect(page.pagination).toEqual({ total: 2, page: 1, limit: 2, totalPages: 1 });
     });
   });
 });
