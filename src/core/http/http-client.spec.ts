@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveSession } from '@/core/storage/session-storage';
 import { buildSession } from '@/test-support/tokens';
 import { ApiError } from './api-error';
-import { http, onUnauthorized } from './http-client';
+import { http, onUnauthorized, setSessionRenewer } from './http-client';
 
 const fetchMock = vi.fn();
 
@@ -20,6 +20,7 @@ describe('http client', () => {
     localStorage.clear();
     vi.stubGlobal('fetch', fetchMock);
     onUnauthorized(() => undefined);
+    setSessionRenewer(null);
   });
 
   afterEach(() => {
@@ -87,26 +88,112 @@ describe('http client', () => {
     await expect(http.get('/transactions/history')).rejects.toBeInstanceOf(ApiError);
   });
 
-  it('notifies when an authenticated request is rejected as unauthorized', async () => {
-    const handler = vi.fn();
-    onUnauthorized(handler);
-    saveSession(buildSession());
-    fetchMock.mockResolvedValue(jsonResponse({ code: 'INVALID_TOKEN', message: 'Expirado' }, 401));
+  it('resolves an empty response body', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 
-    await expect(http.get('/transactions/history')).rejects.toBeInstanceOf(ApiError);
-
-    expect(handler).toHaveBeenCalledOnce();
+    await expect(http.post('/auth/logout', {}, { authenticated: false })).resolves.toBeNull();
   });
 
-  it('does not notify when a login attempt fails', async () => {
-    const handler = vi.fn();
-    onUnauthorized(handler);
-    fetchMock.mockResolvedValue(jsonResponse({ code: 'INVALID_CREDENTIALS', message: 'Mal' }, 401));
+  describe('unauthorized responses', () => {
+    it('notifies when an authenticated request is rejected and there is no way to renew', async () => {
+      const handler = vi.fn();
+      onUnauthorized(handler);
+      saveSession(buildSession());
+      fetchMock.mockResolvedValue(
+        jsonResponse({ code: 'INVALID_TOKEN', message: 'Expirado' }, 401),
+      );
 
-    await expect(http.post('/auth/login', {}, { authenticated: false })).rejects.toBeInstanceOf(
-      ApiError,
-    );
+      await expect(http.get('/transactions/history')).rejects.toBeInstanceOf(ApiError);
 
-    expect(handler).not.toHaveBeenCalled();
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('does not notify when a login attempt fails', async () => {
+      const handler = vi.fn();
+      onUnauthorized(handler);
+      const renewer = vi.fn();
+      setSessionRenewer(renewer);
+      fetchMock.mockResolvedValue(
+        jsonResponse({ code: 'INVALID_CREDENTIALS', message: 'Mal' }, 401),
+      );
+
+      await expect(http.post('/auth/login', {}, { authenticated: false })).rejects.toBeInstanceOf(
+        ApiError,
+      );
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(renewer).not.toHaveBeenCalled();
+    });
+
+    it('renews the session and repeats the request with the new token', async () => {
+      const handler = vi.fn();
+      onUnauthorized(handler);
+      const renewed = { ...buildSession(), token: 'token-renovado' };
+      saveSession(buildSession());
+      setSessionRenewer(async () => {
+        saveSession(renewed);
+        return true;
+      });
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ code: 'INVALID_TOKEN', message: 'Expirado' }, 401))
+        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+      const result = await http.get('/transactions/history');
+
+      expect(result).toEqual({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(lastRequest()[1].headers).toMatchObject({ Authorization: 'Bearer token-renovado' });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('notifies when the session cannot be renewed', async () => {
+      const handler = vi.fn();
+      onUnauthorized(handler);
+      saveSession(buildSession());
+      setSessionRenewer(async () => false);
+      fetchMock.mockResolvedValue(
+        jsonResponse({ code: 'INVALID_TOKEN', message: 'Expirado' }, 401),
+      );
+
+      await expect(http.get('/transactions/history')).rejects.toBeInstanceOf(ApiError);
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('renews only once when the repeated request is rejected again', async () => {
+      const handler = vi.fn();
+      onUnauthorized(handler);
+      saveSession(buildSession());
+      const renewer = vi.fn(async () => true);
+      setSessionRenewer(renewer);
+      fetchMock.mockResolvedValue(
+        jsonResponse({ code: 'INVALID_TOKEN', message: 'Expirado' }, 401),
+      );
+
+      await expect(http.get('/transactions/history')).rejects.toBeInstanceOf(ApiError);
+
+      expect(renewer).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('reports the failure of the renewal without closing the session', async () => {
+      const handler = vi.fn();
+      onUnauthorized(handler);
+      saveSession(buildSession());
+      setSessionRenewer(async () => {
+        throw ApiError.network();
+      });
+      fetchMock.mockResolvedValue(
+        jsonResponse({ code: 'INVALID_TOKEN', message: 'Expirado' }, 401),
+      );
+
+      await expect(http.get('/transactions/history')).rejects.toMatchObject({
+        code: 'NETWORK_ERROR',
+      });
+
+      expect(handler).not.toHaveBeenCalled();
+    });
   });
 });

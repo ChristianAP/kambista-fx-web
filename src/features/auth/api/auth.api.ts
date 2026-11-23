@@ -10,19 +10,36 @@ export interface Registration extends Credentials {
   nombre: string;
 }
 
-interface LoginResponse {
+interface SessionResponse {
   access_token: string;
+  refresh_token: string;
   usuario: SessionUser;
 }
+
+const toSession = ({ access_token, refresh_token, usuario }: SessionResponse): Session => ({
+  token: access_token,
+  refreshToken: refresh_token,
+  user: usuario,
+});
 
 export const authApi = {
   register: (registration: Registration) =>
     http.post<SessionUser>('/auth/register', registration, { authenticated: false }),
 
-  login: async (credentials: Credentials): Promise<Session> => {
-    const { access_token, usuario } = await http.post<LoginResponse>('/auth/login', credentials, {
-      authenticated: false,
-    });
-    return { token: access_token, user: usuario };
-  },
+  login: async (credentials: Credentials): Promise<Session> =>
+    toSession(
+      await http.post<SessionResponse>('/auth/login', credentials, { authenticated: false }),
+    ),
+
+  refresh: async (refreshToken: string): Promise<Session> =>
+    toSession(
+      await http.post<SessionResponse>(
+        '/auth/refresh',
+        { refresh_token: refreshToken },
+        { authenticated: false },
+      ),
+    ),
+
+  logout: (refreshToken: string) =>
+    http.post<void>('/auth/logout', { refresh_token: refreshToken }, { authenticated: false }),
 };

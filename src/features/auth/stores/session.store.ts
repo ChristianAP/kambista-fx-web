@@ -1,14 +1,14 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { isTokenExpired } from '@/core/auth/jwt';
 import type { Session } from '@/core/auth/session';
+import { ApiError } from '@/core/http/api-error';
 import { clearSession, loadSession, saveSession } from '@/core/storage/session-storage';
 import { authApi, type Credentials, type Registration } from '../api/auth.api';
 
 const restoreSession = (): Session | null => {
   const stored = loadSession();
 
-  if (stored && !isTokenExpired(stored.token)) {
+  if (stored?.refreshToken) {
     return stored;
   }
 
@@ -18,6 +18,7 @@ const restoreSession = (): Session | null => {
 
 export const useSessionStore = defineStore('session', () => {
   const session = ref<Session | null>(restoreSession());
+  let pendingRenewal: Promise<boolean> | null = null;
 
   const user = computed(() => session.value?.user ?? null);
   const isAuthenticated = computed(() => session.value !== null);
@@ -37,10 +38,40 @@ export const useSessionStore = defineStore('session', () => {
     await login({ email: registration.email, password: registration.password });
   };
 
-  const logout = (): void => {
-    session.value = null;
-    clearSession();
+  const renew = async (): Promise<boolean> => {
+    const current = session.value;
+
+    if (!current) {
+      return false;
+    }
+
+    try {
+      start(await authApi.refresh(current.refreshToken));
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        return false;
+      }
+      throw error;
+    }
   };
 
-  return { user, isAuthenticated, isAdmin, login, register, logout };
+  const renewSession = (): Promise<boolean> => {
+    pendingRenewal ??= renew().finally(() => {
+      pendingRenewal = null;
+    });
+    return pendingRenewal;
+  };
+
+  const logout = (): void => {
+    const refreshToken = session.value?.refreshToken;
+    session.value = null;
+    clearSession();
+
+    if (refreshToken) {
+      void authApi.logout(refreshToken).catch(() => undefined);
+    }
+  };
+
+  return { user, isAuthenticated, isAdmin, login, register, renewSession, logout };
 });

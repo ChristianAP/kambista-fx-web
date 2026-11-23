@@ -9,7 +9,8 @@ export const makeToken = (expiresInSeconds: number, now: number = Date.now()): s
 };
 
 export const buildSession = (overrides: Partial<Session['user']> = {}): Session => ({
-  token: makeToken(3600),
+  token: makeToken(900),
+  refreshToken: 'refresh-token',
   user: {
     id: 'user-1',
     nombre: 'Juan Pérez',

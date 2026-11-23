@@ -9,5 +9,6 @@ export interface SessionUser {
 
 export interface Session {
   token: string;
+  refreshToken: string;
   user: SessionUser;
 }

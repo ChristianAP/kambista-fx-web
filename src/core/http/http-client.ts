@@ -4,6 +4,7 @@ import { ApiError } from './api-error';
 
 type Method = 'GET' | 'POST';
 type Query = Record<string, string | undefined>;
+type SessionRenewer = () => Promise<boolean>;
 
 interface RequestOptions {
   query?: Query;
@@ -12,9 +13,14 @@ interface RequestOptions {
 }
 
 let unauthorizedHandler: (() => void) | null = null;
+let sessionRenewer: SessionRenewer | null = null;
 
 export const onUnauthorized = (handler: () => void): void => {
   unauthorizedHandler = handler;
+};
+
+export const setSessionRenewer = (renewer: SessionRenewer | null): void => {
+  sessionRenewer = renewer;
 };
 
 const buildUrl = (path: string, query: Query = {}): string => {
@@ -24,6 +30,8 @@ const buildUrl = (path: string, query: Query = {}): string => {
   const search = new URLSearchParams(entries).toString();
   return search ? `${API_URL}${path}?${search}` : `${API_URL}${path}`;
 };
+
+const currentToken = (): string | null => loadSession()?.token ?? null;
 
 const send = async (
   method: Method,
@@ -45,27 +53,49 @@ const send = async (
   }
 };
 
-const request = async <T>(
+const dispatch = async (
+  method: Method,
+  path: string,
+  options: RequestOptions,
+  token: string | null,
+  canRenew = true,
+): Promise<Response> => {
+  const response = await send(method, path, options, token);
+
+  if (response.status !== 401 || !token) {
+    return response;
+  }
+
+  if (canRenew && sessionRenewer && (await sessionRenewer())) {
+    return dispatch(method, path, options, currentToken(), false);
+  }
+
+  unauthorizedHandler?.();
+  return response;
+};
+
+const call = async (
   method: Method,
   path: string,
   options: RequestOptions = {},
-): Promise<T> => {
-  const token = options.authenticated === false ? null : (loadSession()?.token ?? null);
-  const response = await send(method, path, options, token);
+): Promise<{ response: Response; payload: unknown }> => {
+  const token = options.authenticated === false ? null : currentToken();
+  const response = await dispatch(method, path, options, token);
   const payload: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    if (response.status === 401 && token) {
-      unauthorizedHandler?.();
-    }
     throw ApiError.fromResponse(response.status, payload);
   }
 
-  return payload as T;
+  return { response, payload };
 };
+
+const request = async <T>(method: Method, path: string, options?: RequestOptions): Promise<T> =>
+  (await call(method, path, options)).payload as T;
 
 export const http = {
   get: <T>(path: string, query?: Query) => request<T>('GET', path, { query }),
+
   post: <T>(path: string, body: unknown, options: Pick<RequestOptions, 'authenticated'> = {}) =>
     request<T>('POST', path, { ...options, body }),
 };
